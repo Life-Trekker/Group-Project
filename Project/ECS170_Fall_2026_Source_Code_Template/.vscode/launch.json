@@ -1,0 +1,14 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run script_cnn",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/script/stage_3_script/script_cnn.py",
+            "cwd": "${workspaceFolder}",
+            "env": { "PYTHONPATH": "${workspaceFolder}" },
+            "console": "integratedTerminal"
+        }
+    ]
+}
