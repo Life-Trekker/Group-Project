@@ -77,7 +77,7 @@ if 1:
     ax2.grid(True)
 
     plt.tight_layout()
-    plt.savefig(GRAPH_RESULT_DIR + 'cifar_convergence_curves.png', dpi=150)
+    plt.savefig(GRAPH_RESULT_DIR + 'cifar_convergence_curves_augmented.png', dpi=150)
     plt.show()
     
     

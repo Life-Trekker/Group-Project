@@ -33,10 +33,13 @@ class Method_CNN_MNIST(method, nn.Module):
 
         # convolutional feature extractor: (N,C,H,W) -> (N,64,H/4,W/4)
         self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 32, kernel_size=3, padding=1),
+            nn.Conv2d(in_channels, 32, kernel_size=5, padding=2),
             nn.ReLU(),
             nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, kernel_size=3, padding=1),
+            nn.Conv2d(32, 64, kernel_size=5, padding=2),
+            nn.ReLU(),
+            nn.MaxPool2d(2),
+            nn.Conv2d(64, 128, kernel_size=5, padding=2),
             nn.ReLU(),
             nn.MaxPool2d(2),
         )
