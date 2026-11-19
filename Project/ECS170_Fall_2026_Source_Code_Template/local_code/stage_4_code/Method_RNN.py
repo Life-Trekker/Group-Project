@@ -11,6 +11,23 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import numpy as np
 
 
+def load_glove_matrix(glove_path, vocab, dim):
+    '''Builds a (vocab_size, dim) matrix; words not in GloVe get small random vectors, PAD gets zeros.'''
+    matrix = np.random.normal(0, 0.1, (len(vocab), dim)).astype(np.float32)
+    matrix[0] = 0.0                                   # PAD_IDX = 0
+    found = 0
+    with open(glove_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            word, _, rest = line.partition(' ')
+            if word in vocab:                         # only keep words we need
+                vec = np.asarray(rest.split(), dtype=np.float32)
+                if len(vec) == dim:
+                    matrix[vocab[word]] = vec
+                    found += 1
+    print(f'GloVe coverage: {found}/{len(vocab)} vocabulary words')
+    return torch.from_numpy(matrix)
+
+
 class CustomRNN(nn.Module):
     '''Hand-written Elman RNN: h_t = tanh(W_x x_t + W_h h_{t-1} + b)'''
 
@@ -39,14 +56,19 @@ class Method_RNN(method, nn.Module):
     clip_grad = 5.0
 
     def __init__(self, mName, mDescription, vocab_size, embed_dim=128, hidden_dim=128,
-                 rnn_type='LSTM', bidirectional=True, dropout=0.5, num_classes=2):
+                 rnn_type='LSTM', bidirectional=True, dropout=0.5, num_classes=2,
+                 pretrained_embeddings=None, freeze_embeddings=False):
         method.__init__(self, mName, mDescription)
         nn.Module.__init__(self)
 
         self.rnn_type = rnn_type
         self.bidirectional = bidirectional and rnn_type != 'CUSTOM'   # custom cell is one-directional
 
+        # embedding (optionally initialised from GloVe; embed_dim must match the GloVe dimension)
         self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        if pretrained_embeddings is not None:
+            self.embedding.weight.data.copy_(pretrained_embeddings)
+            self.embedding.weight.requires_grad = not freeze_embeddings
 
         if rnn_type == 'CUSTOM':
             self.rnn = CustomRNN(embed_dim, hidden_dim)
@@ -70,13 +92,21 @@ class Method_RNN(method, nn.Module):
                                           enforce_sorted=False)
             _, h = self.rnn(packed)
             if self.rnn_type == 'LSTM':
-                h = h[0]                                    # (dirs, B, H)
+                h = h[0]                                    # (layers*dirs, B, H)
             if self.bidirectional:
                 h = torch.cat([h[-2], h[-1]], dim=1)        # forward + backward
             else:
                 h = h[-1]
 
         return self.classifier(self.drop(h))
+
+    @staticmethod
+    def _get_lengths(split):
+        '''True review lengths: use the loader's values if present, else count non-PAD tokens.'''
+        if 'lengths' in split:
+            return torch.LongTensor(np.array(split['lengths']))
+        X = np.array(split['X'])
+        return torch.LongTensor(np.maximum((X != 0).sum(axis=1), 1))   # PAD_IDX = 0
 
     # NOTE: this class overrides nn.Module.train(), so nn.Module.eval() (which calls
     # self.train(False)) would break. Switch modes through nn.Module.train explicitly.
@@ -96,15 +126,17 @@ class Method_RNN(method, nn.Module):
         return torch.cat(preds)
 
     def train(self, X, y):
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
+        # only pass trainable parameters (matters when the embeddings are frozen)
+        optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.parameters()),
+                                     lr=self.learning_rate)
         loss_function = nn.CrossEntropyLoss()
         evaluator = Evaluate_Metrics('training evaluator', '')
 
         X_t = torch.LongTensor(np.array(X))
-        len_t = torch.LongTensor(np.array(self.data['train']['lengths']))
+        len_t = self._get_lengths(self.data['train'])
         y_t = torch.LongTensor(np.array(y))
         X_test_t = torch.LongTensor(np.array(self.data['test']['X']))
-        len_test_t = torch.LongTensor(np.array(self.data['test']['lengths']))
+        len_test_t = self._get_lengths(self.data['test'])
         n = X_t.shape[0]
         self.history = {'epoch': [], 'loss': [], 'train_acc': [], 'test_acc': []}
 
@@ -147,7 +179,7 @@ class Method_RNN(method, nn.Module):
 
     def test(self, X):
         X_t = torch.LongTensor(np.array(X))
-        len_t = torch.LongTensor(np.array(self.data['test']['lengths']))
+        len_t = self._get_lengths(self.data['test'])
         return self._predict(X_t, len_t)
 
     def run(self):
